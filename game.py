@@ -1,86 +1,111 @@
-import pygame
+import socket
+import threading
+from time import sleep
 
-pygame.init()
-
-SCREEN_WIDTH = 500
-SCREEN_HEIGHT = 600
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-
-SPAWN_POSITION = (0, 0)
-
-class Ground:
-
-    def __init__(self) -> None:
-        self.height = 50
-        self.width = SCREEN_WIDTH
-        self.color = (255, 255, 255)
-        self.rect = pygame.Rect(0, SCREEN_HEIGHT - self.height, SCREEN_WIDTH, self.height)
-    
-    def draw(self) -> None:
-        return pygame.draw.rect(screen, self.color, self.rect)
-
-
+IN_GAME = False
 
 class Player:
 
-    def __init__(self, color=(26, 0, 26), name='karen') -> None:
-        self.color = color
+    def __init__(self, name, x=1, y=8) -> None:
         self.name = name
-        self.rect = pygame.Rect(*SPAWN_POSITION, 20, 50)
-        self.gravity = 15
-        self.jumping = 0
-        self.falling = 0.0
-        self.jumprange = 400
+        self.x = x
+        self.y = y
 
-    def draw(self) -> None:
-        return pygame.draw.rect(screen, self.color, self.rect)
+class MainPlayer(Player):
 
-    def gravity_fall(self):
-        if self.rect.y + self.gravity <= 500:
-            self.rect.y += self.gravity
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.teammates = []
+    
+    def changepos(self):
+        self.x += 1
+        self.y += 1
+        client_socket.send(f'newpos:{self.x}:{self.y}'.encode())
+
+
+def register():
+    while True:
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect(('127.0.0.1', 2075))
+
+        nick = input()
+        print(nick)
+        client_socket.send(nick.encode())
+        answer = client_socket.recv(1024)
+        if answer != b'0':
+            print('close')
+            client_socket.close()
         else:
-            self.rect.y += 500 - self.rect.y
-    
-    def jump(self):
-        if not self.jumping:
-            self.jumping = self.jumprange // 8
-    
-    def progjump(self):
-        if self.jumprange:
-            if self.jumping > self.jumprange:
-                self.jumping = self.jumprange
-            self.jumping -= 5 if self.jumping > 5 else 0
-            self.rect.y -= self.jumping
-            self.jumprange -= self.jumping
+            print('yes')
+            return (nick, client_socket)
 
-            if not self.jumprange:
-                self.jumprange = 400
-                self.jumping = 0
+def client(mp, client_socket):
+    global IN_GAME
+    def servermessage():
+        while True:
+            print('WAITING')
+            msg = client_socket.recv(1024)
+            print('MSG IN WHILE ', msg)
+            if not msg or msg == b'leaveroom':
+                break
+            if 'newpl' in msg.decode():
+                newplayernick = msg.decode().split(':')[1]
+                mp.teammates.append(Player(newplayernick))
+                print('NEW PLAYER')
+            elif 'newpos' in msg.decode():
+                print(msg.decode().split(':'))
+                assert len(msg.decode().split(':')) == 4, (msg, False)
+                _, newplayernick, x, y = msg.decode().split(':')
+                print('new pos for ', newplayernick, ':', x, y)
+                
+                for teammate in mp.teammates:
+                    if teammate.name == newplayernick:
+                        teammate.x, teammate.y = x, y
 
+    threadOn = False
+    while True:
+        command = input()
+
+        if command == 'createroom':
+            print('sended ')
+            threadOn = True
+            client_socket.send(b'createroom')
+            roompass = client_socket.recv(1024)
+            print(roompass)
+        elif 'connect' in command:
+            client_socket.send(command.encode())
+            answer = client_socket.recv(1024)
+            if answer == b'0':
+                threadOn = True
+                players = client_socket.recv(1024).decode().split(';')
+                print(players)
+                for player in players:
+                    mp.teammates.append(Player(player))
             
+        if threadOn:
+            IN_GAME = True
+            th3 = threading.Thread(target=servermessage)
+            th3.start()
+            th3.join()
+            IN_GAME = False
+
+if __name__ == '__main__':
+    mp, client_socket = register()
+    mp = MainPlayer(mp)
+
+    clientThread = threading.Thread(target=client, args=(mp, client_socket))
+    clientThread.start()
+
+    h = len(mp.teammates)
+    while True:
+        if IN_GAME:
+            print('changing pos')
+            mp.changepos()
+        if len(mp.teammates) != h:
+            print(mp.teammates, 'NEW TEAMMATE')
+        sleep(10) 
 
 
-    
 
 
 
-clock = pygame.time.Clock()
-ground = Ground()
-mainplayer = Player()
-
-while True:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            exit()
-
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_w:
-                mainplayer.jump()
-
-    screen.fill((0, 153, 255))
-    ground.draw()
-    mainplayer.draw()
-    mainplayer.gravity_fall()
-    mainplayer.progjump()
-    pygame.display.flip()
-    clock.tick(60)
