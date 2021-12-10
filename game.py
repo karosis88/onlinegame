@@ -1,7 +1,10 @@
 import socket
 import threading
 from time import sleep
+from multiprocessing import Lock
 
+
+lk = Lock()
 IN_GAME = False
 
 class Player:
@@ -16,12 +19,6 @@ class MainPlayer(Player):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.teammates = []
-    
-    def changepos(self):
-        self.x += 1
-        self.y += 1
-        client_socket.send(f'newpos:{self.x}:{self.y}'.encode())
-
 
 def register():
     while True:
@@ -39,35 +36,37 @@ def register():
             print('yes')
             return (nick, client_socket)
 
+
+
 def client(mp, client_socket):
     global IN_GAME
     def servermessage():
         while True:
             print('WAITING')
             msg = client_socket.recv(1024)
-            print('MSG IN WHILE ', msg)
-            if not msg or msg == b'leaveroom':
-                break
-            if 'newpl' in msg.decode():
-                newplayernick = msg.decode().split(':')[1]
-                mp.teammates.append(Player(newplayernick))
-                print('NEW PLAYER')
-            elif 'newpos' in msg.decode():
-                print(msg.decode().split(':'))
-                assert len(msg.decode().split(':')) == 4, (msg, False)
-                _, newplayernick, x, y = msg.decode().split(':')
-                print('new pos for ', newplayernick, ':', x, y)
-                
-                for teammate in mp.teammates:
-                    if teammate.name == newplayernick:
-                        teammate.x, teammate.y = x, y
+            commands = msg.split(';')
+
+            for msg in commands:
+                if not msg or msg == b'leaveroom':
+                    break
+                if 'newpl' in msg.decode():
+                    newplayernick = msg.decode().split(':')[1]
+                    mp.teammates.append(Player(newplayernick))
+                    print('NEW PLAYER')
+                elif 'newpos' in msg.decode():
+                    assert len(msg.decode().split(':')) == 4, (msg, False)
+                    _, newplayernick, x, y = msg.decode().split(':')
+                    print('new pos for ', newplayernick, ':', x, y)
+                    
+                    for teammate in mp.teammates:
+                        if teammate.name == newplayernick:
+                            teammate.x, teammate.y = x, y
 
     threadOn = False
     while True:
         command = input()
 
         if command == 'createroom':
-            print('sended ')
             threadOn = True
             client_socket.send(b'createroom')
             roompass = client_socket.recv(1024)
@@ -78,7 +77,7 @@ def client(mp, client_socket):
             if answer == b'0':
                 threadOn = True
                 players = client_socket.recv(1024).decode().split(';')
-                print(players)
+                mp.teammates.clear()
                 for player in players:
                     mp.teammates.append(Player(player))
             
